@@ -55,6 +55,44 @@ The gateway image includes:
 
 The gateway image is intentionally unconfigured. It does not include enrollment tokens, labels, tenant settings, or runtime secrets.
 
+## Runtime Configuration
+
+### Client image
+
+Mount `/etc/sft/` when you need to provide client-side configuration to the `sft` CLI:
+
+```bash
+docker run --rm \
+  -v "$PWD/sft-config:/etc/sft" \
+  ghcr.io/fabiograsso/opa-scaleft-client:latest \
+  sft --version
+```
+
+### Gateway image
+
+For gateway experiments, mount `/etc/sft/` so the container can read the gateway configuration file:
+
+```text
+/etc/sft/sft-gatewayd.yaml
+```
+
+For the setup token, use one of these options:
+
+- mount the setup token file read-only at `/var/lib/sft-gatewayd/setup.token`
+- or set `SetupToken` directly in `/etc/sft/sft-gatewayd.yaml`
+
+Example volume layout:
+
+```bash
+docker run --rm \
+  -v "$PWD/sft-config:/etc/sft" \
+  -v "$PWD/setup.token:/var/lib/sft-gatewayd/setup.token:ro" \
+  ghcr.io/fabiograsso/opa-scaleft-gateway:latest \
+  bash
+```
+
+Okta documents `SetupTokenFile` as the recommended method, with `/var/lib/sft-gatewayd/setup.token` as the Linux default. If `SetupToken` is also configured in the YAML file, the gateway uses the token specified there.
+
 ## Publishing To GHCR
 
 The repository includes one GitHub Actions workflow:
@@ -146,4 +184,5 @@ docker run --rm opa-scaleft-gateway:local dpkg -l scaleft-gateway
 - [Okta Privileged Access clients](https://help.okta.com/oie/en-us/content/topics/privileged-access/clients/pam-clients.htm)
 - [Install the Okta Privileged Access client on Ubuntu or Debian](https://help.okta.com/oie/en-us/content/topics/privileged-access/tool-setup/pam-sft-ubuntu.htm)
 - [Install the Okta Privileged Access gateway on Ubuntu or Debian](https://help.okta.com/en-us/content/topics/privileged-access/tool-setup/pam-gateway-install-ubuntu.htm)
+- [Configure the Okta Privileged Access gateway](https://help.okta.com/oie/en-us/content/topics/privileged-access/gateways/pam-gateway-configure.htm)
 - [GitHub Container Registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)
