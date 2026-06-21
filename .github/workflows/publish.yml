@@ -1,0 +1,149 @@
+name: Publish Container Images
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1"
+  push:
+    branches:
+      - main
+    paths:
+      - Dockerfile.client
+      - Dockerfile.gateway
+      - .github/workflows/publish.yml
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  OKTA_PAM_APT_CODENAME: bookworm
+  OKTA_PAM_APT_ARCH: amd64
+
+jobs:
+  publish:
+    name: Build and publish ${{ matrix.image_name }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image_name: opa-scaleft-client
+            dockerfile: Dockerfile.client
+            package_name: scaleft-client-tools
+            kind: client
+          - image_name: opa-scaleft-gateway
+            dockerfile: Dockerfile.gateway
+            package_name: scaleft-gateway
+            kind: gateway
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Login to GitHub Container Registry
+        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Read latest package version from apt
+        id: apt-version
+        run: |
+          set -euo pipefail
+
+          PACKAGE_NAME="${{ matrix.package_name }}"
+          PACKAGE_INDEX_URL="https://dist.scaleft.com/repos/deb/dists/${OKTA_PAM_APT_CODENAME}/okta/binary-${OKTA_PAM_APT_ARCH}/Packages"
+          PACKAGE_INDEX=$(curl -fsSL "$PACKAGE_INDEX_URL")
+          PACKAGE_VERSION=$(printf '%s\n' "$PACKAGE_INDEX" \
+            | awk -v package="$PACKAGE_NAME" '
+                BEGIN { found = 0 }
+                /^Package: / { found = ($2 == package) }
+                found && /^Version: / { print $2 }
+              ' \
+            | sed -E 's/^[0-9]+://; s/~.*$//; s/-[^-]+$//' \
+            | sort -V \
+            | tail -1)
+
+          if [ -z "$PACKAGE_VERSION" ]; then
+            echo "Unable to resolve latest $PACKAGE_NAME version from $PACKAGE_INDEX_URL."
+            exit 1
+          fi
+
+          echo "Latest $PACKAGE_NAME package version: $PACKAGE_VERSION"
+          echo "Using image tag version: $PACKAGE_VERSION"
+          echo "image_version=$PACKAGE_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Check whether version tag already exists
+        id: version-tag
+        run: |
+          set -euo pipefail
+
+          IMAGE="ghcr.io/${{ github.repository_owner }}/${{ matrix.image_name }}"
+          IMAGE_VERSION="${{ steps.apt-version.outputs.image_version }}"
+
+          if docker manifest inspect "${IMAGE}:${IMAGE_VERSION}" >/dev/null 2>&1; then
+            echo "Image tag ${IMAGE}:${IMAGE_VERSION} already exists. Nothing to publish."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Image tag ${IMAGE}:${IMAGE_VERSION} does not exist yet. Publishing new version."
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build image
+        if: steps.version-tag.outputs.exists == 'false'
+        run: |
+          set -euo pipefail
+
+          IMAGE="ghcr.io/${{ github.repository_owner }}/${{ matrix.image_name }}"
+
+          docker build \
+            --file "${{ matrix.dockerfile }}" \
+            --label "org.opencontainers.image.revision=${{ github.sha }}" \
+            --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
+            -t "${IMAGE}:latest" \
+            .
+
+      - name: Smoke test image
+        if: steps.version-tag.outputs.exists == 'false'
+        run: |
+          set -euo pipefail
+
+          IMAGE="ghcr.io/${{ github.repository_owner }}/${{ matrix.image_name }}"
+          EXPECTED_IMAGE_VERSION="${{ steps.apt-version.outputs.image_version }}"
+          PACKAGE_NAME="${{ matrix.package_name }}"
+
+          PACKAGE_VERSION=$(docker run --rm "$IMAGE:latest" dpkg-query -W -f='${Version}' "$PACKAGE_NAME")
+          IMAGE_VERSION=$(echo "$PACKAGE_VERSION" | sed -E 's/^[0-9]+://; s/-[^-]+$//')
+
+          if [ "$IMAGE_VERSION" != "$EXPECTED_IMAGE_VERSION" ]; then
+            echo "Built image has $PACKAGE_NAME version $IMAGE_VERSION, but apt metadata resolved $EXPECTED_IMAGE_VERSION."
+            exit 1
+          fi
+
+          if [ "${{ matrix.kind }}" = "client" ]; then
+            SFT_VERSION_OUTPUT=$(docker run --rm "$IMAGE:latest" sft --version)
+            SFT_VERSION=$(echo "$SFT_VERSION_OUTPUT" | awk '/^sft version / { print $3 }')
+
+            if [ "$SFT_VERSION" != "$EXPECTED_IMAGE_VERSION" ]; then
+              echo "sft --version reported $SFT_VERSION, but expected $EXPECTED_IMAGE_VERSION."
+              exit 1
+            fi
+
+            echo "$SFT_VERSION_OUTPUT"
+            docker run --rm "$IMAGE:latest" jq --version
+            docker run --rm "$IMAGE:latest" bash --version
+          else
+            docker run --rm "$IMAGE:latest" dpkg -l scaleft-gateway
+            docker run --rm "$IMAGE:latest" bash --version
+          fi
+
+      - name: Push image
+        if: steps.version-tag.outputs.exists == 'false'
+        run: |
+          set -euo pipefail
+
+          IMAGE="ghcr.io/${{ github.repository_owner }}/${{ matrix.image_name }}"
+          IMAGE_VERSION="${{ steps.apt-version.outputs.image_version }}"
+
+          docker tag "${IMAGE}:latest" "${IMAGE}:${IMAGE_VERSION}"
+
+          docker push "${IMAGE}:latest"
+          docker push "${IMAGE}:${IMAGE_VERSION}"
