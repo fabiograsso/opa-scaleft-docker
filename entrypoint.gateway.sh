@@ -30,4 +30,4 @@ else
 fi
 
 echo "--> Starting OPA Gateway daemon..."
-exec /usr/sbin/sft-gatewayd
+exec /usr/sbin/sft-gatewayd service
