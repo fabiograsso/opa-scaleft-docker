@@ -35,6 +35,6 @@ RUN curl -fsSL https://dist.scaleft.com/GPG-KEY-OktaPAM-2023 \
 
 COPY entrypoint.gateway.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh \
-    && echo '*.* /proc/1/fd/1' > /etc/rsyslog.conf
+    && echo '*.* /proc/1/fd/1' >> /etc/rsyslog.conf
 
 CMD ["/entrypoint.sh"]
