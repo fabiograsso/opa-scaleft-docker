@@ -5,6 +5,7 @@ echo "--> Configuring OPA Gateway for database integration..."
 
 mkdir -p /etc/sft
 mkdir -p /var/lib/sft-gatewayd
+mkdir -p /var/log/sft/sessions
 
 # Use an existing setup token file, otherwise fall back to the environment variable
 if [ -f /var/lib/sft-gatewayd/setup.token ]; then
