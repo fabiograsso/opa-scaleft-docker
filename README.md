@@ -15,6 +15,7 @@ No OPA credentials, API keys, enrollment tokens, team configuration, or workload
 |-------|------------|---------|----------|
 | `ghcr.io/fabiograsso/opa-scaleft-client` | `Dockerfile.client` | `scaleft-client-tools` | CI/CD automation, Workloads, `sft` CLI operations, SSH smoke tests |
 | `ghcr.io/fabiograsso/opa-scaleft-gateway` | `Dockerfile.gateway` | `scaleft-gateway` | Lab or automation base image for OPA gateway package experiments |
+| `ghcr.io/fabiograsso/opa-scaleft-gateway-infra` | `Dockerfile.gatewayInfrastructure` | `scaleft-gateway` | Gateway image with the Infrastructure Orchestrator role enabled for database integration |
 
 Each image is published with:
 
@@ -30,6 +31,8 @@ ghcr.io/fabiograsso/opa-scaleft-client:latest
 ghcr.io/fabiograsso/opa-scaleft-client:1.108.0
 ghcr.io/fabiograsso/opa-scaleft-gateway:latest
 ghcr.io/fabiograsso/opa-scaleft-gateway:1.108.0
+ghcr.io/fabiograsso/opa-scaleft-gateway-infra:latest
+ghcr.io/fabiograsso/opa-scaleft-gateway-infra:1.108.0
 ```
 
 ## What Is Included
@@ -93,6 +96,23 @@ docker run --rm \
 
 Okta documents `SetupTokenFile` as the recommended method, with `/var/lib/sft-gatewayd/setup.token` as the Linux default. If `SetupToken` is also configured in the YAML file, the gateway uses the token specified there.
 
+### Gateway (Infrastructure Orchestrator) image
+
+The `opa-scaleft-gateway-infra` image is built on top of the gateway image and adds a single configuration file that enables the Infrastructure Orchestrator role, which is required for database integration:
+
+```text
+/etc/sft/sftd-gateway.yaml
+```
+
+with the contents:
+
+```yaml
+Orchestrator:
+  Enabled: true
+```
+
+Runtime configuration (setup token, `/etc/sft/` mounts) works the same way as the gateway image described above.
+
 ## Publishing To GHCR
 
 The repository includes one GitHub Actions workflow:
@@ -104,7 +124,7 @@ The repository includes one GitHub Actions workflow:
 It runs on:
 
 - manual dispatch
-- push to `main` when `Dockerfile.client`, `Dockerfile.gateway`, or the publish workflow changes
+- push to `main` when `Dockerfile.client`, `Dockerfile.gateway`, `Dockerfile.gatewayInfrastructure`, or the publish workflow changes
 - a weekly schedule, every Monday at 06:00 UTC
 
 The workflow uses the built-in `GITHUB_TOKEN`, so no personal access token is required for publishing from this repository.
@@ -118,6 +138,8 @@ permissions:
 ```
 
 For each image, scheduled runs read the Debian `Packages` metadata from the Okta PAM apt repository before building. The workflow extracts all versions for the target package, selects the latest with version-aware sorting, and checks GHCR for the matching tag. If the tag already exists, that image is skipped. If the tag is new, the workflow builds the image, runs a smoke test, and publishes both `latest` and the version tag.
+
+The `opa-scaleft-gateway-infra` image is published by a separate job that runs after the gateway image. It builds from the freshly published `opa-scaleft-gateway` version tag and is versioned with the same `scaleft-gateway` package version.
 
 The first push creates GitHub Container Registry packages. GHCR packages are private by default when first published. You can later change visibility or grant repository access from the package settings.
 
@@ -177,6 +199,11 @@ docker run --rm opa-scaleft-client:local sft --version
 
 docker build -f Dockerfile.gateway -t opa-scaleft-gateway:local .
 docker run --rm opa-scaleft-gateway:local dpkg -l scaleft-gateway
+
+docker build -f Dockerfile.gatewayInfrastructure \
+  --build-arg BASE_IMAGE=opa-scaleft-gateway:local \
+  -t opa-scaleft-gateway-infra:local .
+docker run --rm opa-scaleft-gateway-infra:local cat /etc/sft/sftd-gateway.yaml
 ```
 
 ## References

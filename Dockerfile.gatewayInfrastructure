@@ -1,0 +1,17 @@
+# Build the base gateway image first, then build this one.
+# Example:
+#   docker build -f Dockerfile.gateway -t opa-scaleft-gateway:latest .
+#   docker build -f Dockerfile.gatewayInfrastructure \
+#       --build-arg BASE_IMAGE=opa-scaleft-gateway:latest \
+#       -t opa-scaleft-gateway-infra:latest .
+ARG BASE_IMAGE=opa-scaleft-gateway:latest
+FROM ${BASE_IMAGE}
+
+LABEL org.opencontainers.image.title="OPA ScaleFT Gateway (Infrastructure Orchestrator)"
+LABEL org.opencontainers.image.description="OPA gateway image with the Infrastructure Orchestrator role enabled for database integration."
+
+# Enable the Infrastructure Orchestrator role (required for database integration)
+RUN mkdir -p /etc/sft \
+    && printf '# Orchestrator\nOrchestrator:\n  Enabled: true\n' > /etc/sft/sftd-gateway.yaml
+
+CMD ["/entrypoint.sh"]

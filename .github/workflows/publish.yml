@@ -10,6 +10,7 @@ on:
     paths:
       - Dockerfile.client
       - Dockerfile.gateway
+      - Dockerfile.gatewayInfrastructure
       - .github/workflows/publish.yml
 
 permissions:
@@ -141,6 +142,116 @@ jobs:
           set -euo pipefail
 
           IMAGE="ghcr.io/${{ github.repository_owner }}/${{ matrix.image_name }}"
+          IMAGE_VERSION="${{ steps.apt-version.outputs.image_version }}"
+
+          docker tag "${IMAGE}:latest" "${IMAGE}:${IMAGE_VERSION}"
+
+          docker push "${IMAGE}:latest"
+          docker push "${IMAGE}:${IMAGE_VERSION}"
+
+  publish-infrastructure:
+    name: Build and publish opa-scaleft-gateway-infra
+    needs: publish
+    runs-on: ubuntu-24.04
+    env:
+      IMAGE_NAME: opa-scaleft-gateway-infra
+      BASE_IMAGE_NAME: opa-scaleft-gateway
+      PACKAGE_NAME: scaleft-gateway
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Login to GitHub Container Registry
+        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Read latest package version from apt
+        id: apt-version
+        run: |
+          set -euo pipefail
+
+          PACKAGE_INDEX_URL="https://dist.scaleft.com/repos/deb/dists/${OKTA_PAM_APT_CODENAME}/okta/binary-${OKTA_PAM_APT_ARCH}/Packages"
+          PACKAGE_INDEX=$(curl -fsSL "$PACKAGE_INDEX_URL")
+          PACKAGE_VERSION=$(printf '%s\n' "$PACKAGE_INDEX" \
+            | awk -v package="$PACKAGE_NAME" '
+                BEGIN { found = 0 }
+                /^Package: / { found = ($2 == package) }
+                found && /^Version: / { print $2 }
+              ' \
+            | sed -E 's/^[0-9]+://; s/~.*$//; s/-[^-]+$//' \
+            | sort -V \
+            | tail -1)
+
+          if [ -z "$PACKAGE_VERSION" ]; then
+            echo "Unable to resolve latest $PACKAGE_NAME version from $PACKAGE_INDEX_URL."
+            exit 1
+          fi
+
+          echo "Latest $PACKAGE_NAME package version: $PACKAGE_VERSION"
+          echo "Using image tag version: $PACKAGE_VERSION"
+          echo "image_version=$PACKAGE_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Check whether version tag already exists
+        id: version-tag
+        run: |
+          set -euo pipefail
+
+          IMAGE="ghcr.io/${{ github.repository_owner }}/${IMAGE_NAME}"
+          IMAGE_VERSION="${{ steps.apt-version.outputs.image_version }}"
+
+          if docker manifest inspect "${IMAGE}:${IMAGE_VERSION}" >/dev/null 2>&1; then
+            echo "Image tag ${IMAGE}:${IMAGE_VERSION} already exists. Nothing to publish."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Image tag ${IMAGE}:${IMAGE_VERSION} does not exist yet. Publishing new version."
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build image
+        if: steps.version-tag.outputs.exists == 'false'
+        run: |
+          set -euo pipefail
+
+          IMAGE="ghcr.io/${{ github.repository_owner }}/${IMAGE_NAME}"
+          BASE_IMAGE="ghcr.io/${{ github.repository_owner }}/${BASE_IMAGE_NAME}:${{ steps.apt-version.outputs.image_version }}"
+
+          docker build \
+            --file Dockerfile.gatewayInfrastructure \
+            --build-arg "BASE_IMAGE=${BASE_IMAGE}" \
+            --label "org.opencontainers.image.revision=${{ github.sha }}" \
+            --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
+            -t "${IMAGE}:latest" \
+            .
+
+      - name: Smoke test image
+        if: steps.version-tag.outputs.exists == 'false'
+        run: |
+          set -euo pipefail
+
+          IMAGE="ghcr.io/${{ github.repository_owner }}/${IMAGE_NAME}"
+          EXPECTED_IMAGE_VERSION="${{ steps.apt-version.outputs.image_version }}"
+
+          PACKAGE_VERSION=$(docker run --rm "$IMAGE:latest" dpkg-query -W -f='${Version}' "$PACKAGE_NAME")
+          IMAGE_VERSION=$(echo "$PACKAGE_VERSION" | sed -E 's/^[0-9]+://; s/-[^-]+$//')
+
+          if [ "$IMAGE_VERSION" != "$EXPECTED_IMAGE_VERSION" ]; then
+            echo "Built image has $PACKAGE_NAME version $IMAGE_VERSION, but apt metadata resolved $EXPECTED_IMAGE_VERSION."
+            exit 1
+          fi
+
+          CONFIG=$(docker run --rm "$IMAGE:latest" cat /etc/sft/sftd-gateway.yaml)
+          echo "$CONFIG"
+          if ! echo "$CONFIG" | grep -q 'Enabled: true'; then
+            echo "Infrastructure Orchestrator configuration is missing or not enabled."
+            exit 1
+          fi
+
+      - name: Push image
+        if: steps.version-tag.outputs.exists == 'false'
+        run: |
+          set -euo pipefail
+
+          IMAGE="ghcr.io/${{ github.repository_owner }}/${IMAGE_NAME}"
           IMAGE_VERSION="${{ steps.apt-version.outputs.image_version }}"
 
           docker tag "${IMAGE}:latest" "${IMAGE}:${IMAGE_VERSION}"

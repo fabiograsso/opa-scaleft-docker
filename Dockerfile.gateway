@@ -32,4 +32,7 @@ RUN curl -fsSL https://dist.scaleft.com/GPG-KEY-OktaPAM-2023 \
     && apt-get purge -y --auto-remove gpg \
     && rm -rf /var/lib/apt/lists/*
 
-CMD ["bash"]
+COPY entrypoint.gateway.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+CMD ["/entrypoint.sh"]
