@@ -12,6 +12,6 @@ LABEL org.opencontainers.image.description="OPA gateway image with the Infrastru
 
 # Enable the Infrastructure Orchestrator role (required for database integration)
 RUN mkdir -p /etc/sft \
-    && printf '# Orchestrator\nOrchestrator:\n  Enabled: true\n' > /etc/sft/sftd-gateway.yaml
+    && printf '# Orchestrator\nOrchestrator:\n  Enabled: true\n' > /etc/sft/sft-gatewayd.yaml
 
 CMD ["/entrypoint.sh"]

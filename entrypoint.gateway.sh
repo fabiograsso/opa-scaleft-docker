@@ -30,5 +30,8 @@ else
     echo ""
 fi
 
+echo "--> Starting syslog (forwarding to Docker stdout)..."
+rsyslogd
+
 echo "--> Starting OPA Gateway daemon..."
-exec /usr/sbin/sft-gatewayd service
+exec /usr/sbin/sft-gatewayd service --syslog
