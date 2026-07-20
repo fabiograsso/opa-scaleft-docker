@@ -29,7 +29,7 @@ RUN curl -fsSL https://dist.scaleft.com/GPG-KEY-OktaPAM-2023 \
         > /etc/apt/sources.list.d/oktapam-stable.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends scaleft-gateway scaleft-client-tools \
-                                                  asciinema \
+                                                   scaleft-rdp-transcoder asciinema \
     && apt-get purge -y --auto-remove gpg \
     && rm -rf /var/lib/apt/lists/*
 
