@@ -101,7 +101,7 @@ Okta documents `SetupTokenFile` as the recommended method, with `/var/lib/sft-ga
 The `opa-scaleft-gateway-infra` image is built on top of the gateway image and adds a single configuration file that enables the Infrastructure Orchestrator role, which is required for database integration:
 
 ```text
-/etc/sft/sftd-gateway.yaml
+/etc/sft/sft-gateway.yaml
 ```
 
 with the contents:
@@ -203,7 +203,7 @@ docker run --rm opa-scaleft-gateway:local dpkg -l scaleft-gateway
 docker build -f Dockerfile.gatewayInfrastructure \
   --build-arg BASE_IMAGE=opa-scaleft-gateway:local \
   -t opa-scaleft-gateway-infra:local .
-docker run --rm opa-scaleft-gateway-infra:local cat /etc/sft/sftd-gateway.yaml
+docker run --rm opa-scaleft-gateway-infra:local cat /etc/sft/sft-gateway.yaml
 ```
 
 ## References
