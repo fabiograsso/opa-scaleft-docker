@@ -239,7 +239,7 @@ jobs:
             exit 1
           fi
 
-          CONFIG=$(docker run --rm "$IMAGE:latest" cat /etc/sft/sft-gateway.yaml)
+          CONFIG=$(docker run --rm "$IMAGE:latest" cat /etc/sft/sft-gatewayd.yaml)
           echo "$CONFIG"
           if ! echo "$CONFIG" | grep -q 'Enabled: true'; then
             echo "Infrastructure Orchestrator configuration is missing or not enabled."
