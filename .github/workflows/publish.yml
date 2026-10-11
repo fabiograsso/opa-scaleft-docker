@@ -9,6 +9,7 @@ on:
       - main
     paths:
       - Dockerfile.client
+      - Dockerfile.server
       - Dockerfile.gateway
       - Dockerfile.gatewayInfrastructure
       - .github/workflows/publish.yml
@@ -18,7 +19,7 @@ permissions:
   packages: write
 
 env:
-  OKTA_PAM_APT_CODENAME: bookworm
+  OKTA_PAM_APT_CODENAME: trixie
   OKTA_PAM_APT_ARCH: amd64
 
 jobs:
@@ -33,6 +34,10 @@ jobs:
             dockerfile: Dockerfile.client
             package_name: scaleft-client-tools
             kind: client
+          - image_name: opa-scaleft-server
+            dockerfile: Dockerfile.server
+            package_name: scaleft-server-tools
+            kind: server
           - image_name: opa-scaleft-gateway
             dockerfile: Dockerfile.gateway
             package_name: scaleft-gateway
@@ -129,6 +134,18 @@ jobs:
             fi
 
             echo "$SFT_VERSION_OUTPUT"
+            docker run --rm "$IMAGE:latest" jq --version
+            docker run --rm "$IMAGE:latest" bash --version
+          elif [ "${{ matrix.kind }}" = "server" ]; then
+            SFTD_VERSION_OUTPUT=$(docker run --rm "$IMAGE:latest" sftd --version)
+            SFTD_VERSION=$(echo "$SFTD_VERSION_OUTPUT" | awk '/^sftd version / { print $3 }')
+
+            if [ "$SFTD_VERSION" != "$EXPECTED_IMAGE_VERSION" ]; then
+              echo "sftd --version reported $SFTD_VERSION, but expected $EXPECTED_IMAGE_VERSION."
+              exit 1
+            fi
+
+            echo "$SFTD_VERSION_OUTPUT"
             docker run --rm "$IMAGE:latest" jq --version
             docker run --rm "$IMAGE:latest" bash --version
           else

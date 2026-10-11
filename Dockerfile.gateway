@@ -1,7 +1,7 @@
-FROM debian:12-slim
+FROM debian:13-slim
 
 LABEL org.opencontainers.image.title="OPA ScaleFT Gateway"
-LABEL org.opencontainers.image.description="Minimal Debian 12 slim image with the Okta Privileged Access gateway package installed."
+LABEL org.opencontainers.image.description="Minimal Debian 13 slim image with the Okta Privileged Access gateway package installed."
 LABEL org.opencontainers.image.source="https://github.com/fabiograsso/opa-scaleft-docker"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 LABEL org.opencontainers.image.author="Fabio Grasso"
@@ -25,13 +25,20 @@ RUN apt-get update \
 RUN curl -fsSL https://dist.scaleft.com/GPG-KEY-OktaPAM-2023 \
         | gpg --dearmor \
         > /usr/share/keyrings/oktapam-2023-archive-keyring.gpg \
-    && echo "deb [signed-by=/usr/share/keyrings/oktapam-2023-archive-keyring.gpg] https://dist.scaleft.com/repos/deb bookworm okta" \
+    && echo "deb [signed-by=/usr/share/keyrings/oktapam-2023-archive-keyring.gpg] https://dist.scaleft.com/repos/deb trixie okta" \
         > /etc/apt/sources.list.d/oktapam-stable.list \
     && apt-get update \
+    # The gateway postinstall calls systemctl directly; stub it so the build doesn't
+    # fail without an init system as PID 1, then restore the real binary.
+    && dpkg-divert --local --rename --add /usr/bin/systemctl \
+    && ln -sf /usr/bin/true /usr/bin/systemctl \
     && apt-get install -y --no-install-recommends scaleft-gateway scaleft-client-tools \
-                                                   scaleft-rdp-transcoder asciinema \
+                                                  asciinema \
+    && rm -f /usr/bin/systemctl \
+    && dpkg-divert --local --rename --remove /usr/bin/systemctl \
     && apt-get purge -y --auto-remove gpg \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /var/lib/sft-gatewayd/*
 
 COPY entrypoint.gateway.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh \

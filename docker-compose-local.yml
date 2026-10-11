@@ -1,0 +1,101 @@
+# Simple OPA (Okta Privileged Access) lab — local build variant.
+#
+# Builds the images from the Dockerfiles in this repo instead of pulling
+# from GHCR. Image tags match the "local" convention used in the README.
+#
+# 1. Copy .env.example to .env and fill in the tokens from the OPA Console.
+# 2. docker compose -f docker-compose-local.yml up -d --build
+# 3. Enroll / use:
+#      docker compose -f docker-compose-local.yml exec client sft enroll <team>
+#      docker compose -f docker-compose-local.yml logs -f gateway gateway-infra server1 server2 server3
+name: opa-lab
+
+services:
+  # Client tools (sft CLI). Stays running so you can exec into it.
+  client:
+    build:
+      context: .
+      dockerfile: Dockerfile.client
+    image: opa-scaleft-client:local
+    container_name: opa-client
+    hostname: opa-client
+    tty: true
+    stdin_open: true
+    command: ["sleep", "infinity"]
+    restart: unless-stopped
+
+  # OPA gateway.
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
+    image: opa-scaleft-gateway:local
+    container_name: opa-gateway
+    hostname: opa-gateway
+    volumes:
+      - ./data/gateway/sft-gatewayd:/var/lib/sft-gatewayd
+      - ./data/gateway/sessions:/var/lib/sft/sessions
+    environment:
+      SFT_SETUP_TOKEN: ${SFT_GATEWAY_SETUP_TOKEN:-}
+    restart: unless-stopped
+
+  # OPA gateway with the Infrastructure Orchestrator role enabled.
+  # Builds on top of the locally built gateway image.
+  gateway-infra:
+    build:
+      context: .
+      dockerfile: Dockerfile.gatewayInfrastructure
+      args:
+        BASE_IMAGE: gateway-base
+      # Build the gateway service first and use it as the base image context.
+      additional_contexts:
+        gateway-base: "service:gateway"
+    image: opa-scaleft-gateway-infra:local
+    container_name: opa-gateway-infra
+    hostname: opa-gateway-infra
+    volumes:
+      - ./data/gateway-infra/sft-gatewayd:/var/lib/sft-gatewayd
+    depends_on:
+      - gateway
+    environment:
+      SFT_SETUP_TOKEN: ${SFT_GATEWAY_INFRA_SETUP_TOKEN:-}
+    restart: unless-stopped
+
+  # Sample servers (sftd agent). They share one server enrollment token.
+  # server1 builds the image; server2 and server3 reuse the same local image.
+  server1:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    image: opa-scaleft-server:local
+    container_name: opa-server1
+    hostname: server1
+    volumes:
+      - ./data/server1/sftd:/var/lib/sftd
+    environment:
+      SFT_ENROLLMENT_TOKEN: ${SFT_SERVER_ENROLLMENT_TOKEN:-}
+    restart: unless-stopped
+
+  server2:
+    image: opa-scaleft-server:local
+    container_name: opa-server2
+    hostname: server2
+    volumes:
+      - ./data/server2/sftd:/var/lib/sftd
+    depends_on:
+      - server1
+    environment:
+      SFT_ENROLLMENT_TOKEN: ${SFT_SERVER_ENROLLMENT_TOKEN:-}
+    restart: unless-stopped
+
+  server3:
+    image: opa-scaleft-server:local
+    container_name: opa-server3
+    hostname: server3
+    volumes:
+      - ./data/server3/sftd:/var/lib/sftd
+    depends_on:
+      - server1
+    environment:
+      SFT_ENROLLMENT_TOKEN: ${SFT_SERVER_ENROLLMENT_TOKEN:-}
+    restart: unless-stopped

@@ -14,6 +14,7 @@ No OPA credentials, API keys, enrollment tokens, team configuration, or workload
 | Image | Dockerfile | Package | Use case |
 |-------|------------|---------|----------|
 | `ghcr.io/fabiograsso/opa-scaleft-client` | `Dockerfile.client` | `scaleft-client-tools` | CI/CD automation, Workloads, `sft` CLI operations, SSH smoke tests |
+| `ghcr.io/fabiograsso/opa-scaleft-server` | `Dockerfile.server` | `scaleft-server-tools` | Lab or automation base image for the OPA server agent (`sftd`) |
 | `ghcr.io/fabiograsso/opa-scaleft-gateway` | `Dockerfile.gateway` | `scaleft-gateway` | Lab or automation base image for OPA gateway package experiments |
 | `ghcr.io/fabiograsso/opa-scaleft-gateway-infra` | `Dockerfile.gatewayInfrastructure` | `scaleft-gateway` | Gateway image with the Infrastructure Orchestrator role enabled for database integration |
 
@@ -29,6 +30,8 @@ Example tags:
 ```text
 ghcr.io/fabiograsso/opa-scaleft-client:latest
 ghcr.io/fabiograsso/opa-scaleft-client:1.108.0
+ghcr.io/fabiograsso/opa-scaleft-server:latest
+ghcr.io/fabiograsso/opa-scaleft-server:1.108.0
 ghcr.io/fabiograsso/opa-scaleft-gateway:latest
 ghcr.io/fabiograsso/opa-scaleft-gateway:1.108.0
 ghcr.io/fabiograsso/opa-scaleft-gateway-infra:latest
@@ -37,7 +40,7 @@ ghcr.io/fabiograsso/opa-scaleft-gateway-infra:1.108.0
 
 ## What Is Included
 
-Both images use `debian:12-slim` and the stable Okta PAM apt repository for Debian 12 `bookworm`.
+Both images use `debian:13-slim` and the stable Okta PAM apt repository for Debian 13 `trixie`.
 
 The client image includes:
 
@@ -48,6 +51,16 @@ The client image includes:
 - OpenSSH client
 - `script` from `util-linux`, useful when a non-interactive runner needs a pseudo-terminal
 
+The server image includes:
+
+- Okta Privileged Access `scaleft-server-tools` (the `sftd` server agent)
+- `bash`
+- `curl`
+- `jq`
+- OpenSSH server
+- `rsyslog`, used to forward `sftd` logs to the container stdout
+- `script` from `util-linux`
+
 The gateway image includes:
 
 - Okta Privileged Access `scaleft-gateway`
@@ -56,7 +69,7 @@ The gateway image includes:
 - `jq`
 - `script` from `util-linux`
 
-The gateway image is intentionally unconfigured. It does not include enrollment tokens, labels, tenant settings, or runtime secrets.
+The server and gateway images are intentionally unconfigured. They do not include enrollment tokens, labels, tenant settings, or runtime secrets.
 
 ## Runtime Configuration
 
@@ -71,28 +84,97 @@ docker run --rm \
   sft --version
 ```
 
+### Server agent image
+
+The server agent (`sftd`) enrolls the container as an OPA-managed server. The image
+entrypoint starts `rsyslog` and then launches `sftd --syslog`, forwarding logs to the
+container stdout.
+
+**Enrollment token.** Provide a server enrollment token with one of these options:
+
+- mount the token file read-only at `/var/lib/sftd/enrollment.token`
+- or set the `SFT_ENROLLMENT_TOKEN` environment variable (the entrypoint writes it to the token file)
+
+Create a **Server** enrollment token in the OPA Console under
+`Resource Administration -> Servers -> Enrollment Tokens`. After the server enrolls,
+`sftd` deletes the token file.
+
+```bash
+docker run --rm \
+  -v "$PWD/enrollment.token:/var/lib/sftd/enrollment.token:ro" \
+  ghcr.io/fabiograsso/opa-scaleft-server:latest
+```
+
+Or with the environment variable:
+
+```bash
+docker run --rm \
+  -e SFT_ENROLLMENT_TOKEN="$(cat enrollment.token)" \
+  ghcr.io/fabiograsso/opa-scaleft-server:latest
+```
+
+**Configuration file.** The Linux server agent reads its configuration from:
+
+```text
+/etc/sft/sftd.yaml
+```
+
+Mount `/etc/sft/` to supply it. For example, a `sftd.yaml` adding custom labels and a
+log level:
+
+```yaml
+LogLevel: info
+CanonicalName: my-server-01
+Labels:
+  env: lab
+  team: platform
+```
+
+```bash
+docker run --rm \
+  -v "$PWD/sftd-config:/etc/sft" \
+  -v "$PWD/enrollment.token:/var/lib/sftd/enrollment.token:ro" \
+  ghcr.io/fabiograsso/opa-scaleft-server:latest
+```
+
+Restart the container to apply configuration changes. For the full list of options,
+see [Configure the Okta Privileged Access server agent](https://help.okta.com/oie/en-us/content/topics/privileged-access/server-agent/pam-configure-server-agent.htm).
+
 ### Gateway image
 
-For gateway experiments, mount `/etc/sft/` so the container can read the gateway configuration file:
+For gateway experiments, mount `/etc/sft/` so the container can read the gateway
+configuration file:
 
 ```text
 /etc/sft/sft-gatewayd.yaml
 ```
 
+Example `sft-gatewayd.yaml`:
+
+```yaml
+# Logging verbosity: debug, info, warn, error
+LogLevel: info
+# Optional access broker / bastion settings, labels, etc.
+Labels:
+  env: lab
+```
+
+Mount it together with the setup token:
+
+```bash
+docker run --rm \
+  -v "$PWD/gateway-config:/etc/sft" \
+  -v "$PWD/setup.token:/var/lib/sft-gatewayd/setup.token:ro" \
+  ghcr.io/fabiograsso/opa-scaleft-gateway:latest
+```
+
+For the full list of options, see
+[Configure the Okta Privileged Access gateway](https://help.okta.com/en-us/content/topics/privileged-access/gateways/pam-gateway-configure.htm).
+
 For the setup token, use one of these options:
 
 - mount the setup token file read-only at `/var/lib/sft-gatewayd/setup.token`
 - or set `SetupToken` directly in `/etc/sft/sft-gatewayd.yaml`
-
-Example volume layout:
-
-```bash
-docker run --rm \
-  -v "$PWD/sft-config:/etc/sft" \
-  -v "$PWD/setup.token:/var/lib/sft-gatewayd/setup.token:ro" \
-  ghcr.io/fabiograsso/opa-scaleft-gateway:latest \
-  bash
-```
 
 Okta documents `SetupTokenFile` as the recommended method, with `/var/lib/sft-gatewayd/setup.token` as the Linux default. If `SetupToken` is also configured in the YAML file, the gateway uses the token specified there.
 
@@ -191,11 +273,102 @@ For a complete GitHub Actions lab that demonstrates OPA Workloads with secret re
 https://github.com/fabiograsso/okta-lab-workloads
 ```
 
+## Lab With Docker Compose
+
+A quick way to spin up a complete OPA test environment with one command. The
+[`docker-compose.yml`](docker-compose.yml) stack starts:
+
+- 3x test server (`server1`, `server2`, `server3` — the `sftd` agent)
+- 1x gateway (`gateway`)
+- 1x gateway with the Infrastructure Orchestrator role (`gateway-infra`)
+- 1x client (`client` — stays running so you can `exec` into it and use `sft`)
+
+All containers share the Compose project name `opa-lab`.
+
+Agent state is persisted in ignored bind-mount directories under `data/`: each
+server has its own `data/serverN/sftd` directory, and each gateway has its own
+`sft-gatewayd` state directory. The standard gateway also persists sessions in
+`data/gateway/sessions`. This keeps enrolled identities across container
+recreation; the Infrastructure Orchestrator gateway does not mount the sessions
+directory.
+
+### Setup
+
+1. Create your token file from the sample:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Fill in the tokens in `.env` (create them in the OPA Console):
+
+   ```bash
+   # Gateways > Enrollment Tokens
+   SFT_GATEWAY_SETUP_TOKEN=
+   SFT_GATEWAY_INFRA_SETUP_TOKEN=
+   # Servers > Enrollment Tokens (shared by server1, server2, server3)
+   SFT_SERVER_ENROLLMENT_TOKEN=
+   ```
+
+   Leave a value empty to start that container unenrolled; it logs a warning and
+   waits until you provide a token and restart it.
+
+3. Start the lab (pulls the published GHCR images):
+
+   ```bash
+   docker compose up -d
+   docker compose logs -f
+   ```
+
+4. Use the client, for example:
+
+   ```bash
+   docker compose exec client sft enroll <team>
+   docker compose exec client sft ssh server1
+   ```
+
+### Build locally instead of pulling
+
+To build the images from the Dockerfiles in this repo instead of pulling from
+GHCR, use [`docker-compose-local.yml`](docker-compose-local.yml):
+
+```bash
+docker compose -f docker-compose-local.yml up -d --build
+```
+
+### Makefile shortcuts
+
+A [`Makefile`](Makefile) wraps the common operations. Run `make` with no
+arguments to see all targets.
+
+```bash
+make start         # start the lab from the public GHCR images
+make logs          # follow logs
+make ps            # container status
+make client        # shell into the client container
+make stop          # stop and remove the containers
+
+make build         # build the images locally
+make local-start   # start the locally built lab
+```
+
+Prefix any run/manage/shell target with `local-` (for example `make local-start`,
+`make local-restart`, `make local-logs`) to operate on the locally built stack
+instead of the GHCR images.
+
+The bind-mounted state under `data/` remains on the host after `make clean` or
+`docker compose down -v`. Remove the relevant directory manually only when you
+intend to discard that agent's enrollment and local state.
+
 ## Local Build
+
 
 ```bash
 docker build -f Dockerfile.client -t opa-scaleft-client:local .
 docker run --rm opa-scaleft-client:local sft --version
+
+docker build -f Dockerfile.server -t opa-scaleft-server:local .
+docker run --rm opa-scaleft-server:local sftd --version
 
 docker build -f Dockerfile.gateway -t opa-scaleft-gateway:local .
 docker run --rm opa-scaleft-gateway:local dpkg -l scaleft-gateway
@@ -210,6 +383,8 @@ docker run --rm opa-scaleft-gateway-infra:local cat /etc/sft/sft-gatewayd.yaml
 
 - [Okta Privileged Access clients](https://help.okta.com/oie/en-us/content/topics/privileged-access/clients/pam-clients.htm)
 - [Install the Okta Privileged Access client on Ubuntu or Debian](https://help.okta.com/oie/en-us/content/topics/privileged-access/tool-setup/pam-sft-ubuntu.htm)
+- [Install the Okta Privileged Access server agent on Ubuntu or Debian](https://help.okta.com/oie/en-us/content/topics/privileged-access/tool-setup/pam-sftd-ubuntu.htm)
+- [Configure the Okta Privileged Access server agent](https://help.okta.com/oie/en-us/content/topics/privileged-access/server-agent/pam-configure-server-agent.htm)
 - [Install the Okta Privileged Access gateway on Ubuntu or Debian](https://help.okta.com/en-us/content/topics/privileged-access/tool-setup/pam-gateway-install-ubuntu.htm)
 - [Configure the Okta Privileged Access gateway](https://help.okta.com/oie/en-us/content/topics/privileged-access/gateways/pam-gateway-configure.htm)
 - [GitHub Container Registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)

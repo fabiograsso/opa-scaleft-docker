@@ -1,0 +1,76 @@
+# Simple OPA (Okta Privileged Access) lab.
+#
+# Images are pulled from the public GHCR repo:
+#   https://github.com/fabiograsso/opa-scaleft-docker
+#
+# 1. Copy .env.example to .env and fill in the tokens from the OPA Console.
+# 2. docker compose up -d
+# 3. Enroll / use:
+#      docker compose exec client sft enroll <team>
+#      docker compose logs -f gateway gateway-infra server1 server2 server3
+name: opa-lab
+
+services:
+  # Client tools (sft CLI). Stays running so you can exec into it.
+  client:
+    image: ghcr.io/fabiograsso/opa-scaleft-client:latest
+    container_name: opa-client
+    hostname: opa-client
+    tty: true
+    stdin_open: true
+    command: ["sleep", "infinity"]
+    restart: unless-stopped
+
+  # OPA gateway.
+  gateway:
+    image: ghcr.io/fabiograsso/opa-scaleft-gateway:latest
+    container_name: opa-gateway
+    hostname: opa-gateway
+    volumes:
+      - ./data/gateway/sft-gatewayd:/var/lib/sft-gatewayd
+      - ./data/gateway/sessions:/var/lib/sft/sessions
+    environment:
+      SFT_SETUP_TOKEN: ${SFT_GATEWAY_SETUP_TOKEN:-}
+    restart: unless-stopped
+
+  # OPA gateway with the Infrastructure Orchestrator role enabled.
+  gateway-infra:
+    image: ghcr.io/fabiograsso/opa-scaleft-gateway-infra:latest
+    container_name: opa-gateway-infra
+    hostname: opa-gateway-infra
+    volumes:
+      - ./data/gateway-infra/sft-gatewayd:/var/lib/sft-gatewayd
+    environment:
+      SFT_SETUP_TOKEN: ${SFT_GATEWAY_INFRA_SETUP_TOKEN:-}
+    restart: unless-stopped
+
+  # Sample servers (sftd agent). They share one server enrollment token.
+  server1:
+    image: ghcr.io/fabiograsso/opa-scaleft-server:latest
+    container_name: opa-server1
+    hostname: server1
+    volumes:
+      - ./data/server1/sftd:/var/lib/sftd
+    environment:
+      SFT_ENROLLMENT_TOKEN: ${SFT_SERVER_ENROLLMENT_TOKEN:-}
+    restart: unless-stopped
+
+  server2:
+    image: ghcr.io/fabiograsso/opa-scaleft-server:latest
+    container_name: opa-server2
+    hostname: server2
+    volumes:
+      - ./data/server2/sftd:/var/lib/sftd
+    environment:
+      SFT_ENROLLMENT_TOKEN: ${SFT_SERVER_ENROLLMENT_TOKEN:-}
+    restart: unless-stopped
+
+  server3:
+    image: ghcr.io/fabiograsso/opa-scaleft-server:latest
+    container_name: opa-server3
+    hostname: server3
+    volumes:
+      - ./data/server3/sftd:/var/lib/sftd
+    environment:
+      SFT_ENROLLMENT_TOKEN: ${SFT_SERVER_ENROLLMENT_TOKEN:-}
+    restart: unless-stopped
